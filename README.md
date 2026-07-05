@@ -13,6 +13,36 @@ Microservicio FastAPI para procesar imágenes desde n8n y otros clientes.
 - POST /thumbnail
 - POST /instagram-feed
 - POST /instagram-story
+- POST /card  (tarjeta 1080×1080 con overlay de texto — Golden brand)
+
+## /card — tarjeta de carrusel con texto (JSON)
+
+Renderiza server-side (Pillow) una tarjeta 1080×1080 con la foto de fondo + kicker + headline
+en el sistema de marca Golden (gradiente de legibilidad, marco hairline, wordmark GOLDEN,
+regla dorado-gold). Reemplaza el render HTML de Browserless. Requiere las fuentes en `fonts/`
+(ver `fonts/DOWNLOAD.md`).
+
+```http
+POST http://goldenflyfihing_golden-image-api:8000/card
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "image_url": "https://goldenflyfishing.com/.../foto.jpg",
+  "kicker": "GOLDEN DORADO",
+  "headline": "The strike that clears the water",
+  "sub_text": "",
+  "location": "Upper Paraná · AR",
+  "role": "hook",
+  "wordmark": "GOLDEN",
+  "mode": "auto"
+}
+```
+- `mode`: `auto` (default, decide cover/contain según el aspecto) | `cover` | `contain`.
+- `role`: `cta` o `cta_cover` centran el bloque y oscurecen (para la portada del lead magnet).
+- Devuelve `image/jpeg`.
 
 ## Ejemplos desde n8n
 

@@ -2,12 +2,29 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from services.image_service import ImageProcessingError, ImageService
+from services.card_service import CardError, CardService
 from utils.responses import error_response
 
-app = FastAPI(title="Golden Media API", version="1.0.0")
+app = FastAPI(title="Golden Media API", version="1.1.0")
 image_service = ImageService()
+card_service = CardService()
+
+
+class CardRequest(BaseModel):
+    image_url: str
+    kicker: str = ""
+    headline: str = ""
+    sub_text: str = ""
+    wordmark: str = "GOLDEN"
+    location: str = ""
+    role: str = ""
+    mode: str = "auto"          # auto | cover | contain
+    accent: bool = True
+    size: int = 1080
+    quality: int = 92
 
 
 @app.get("/")
@@ -129,3 +146,34 @@ async def instagram_story(
         return error_response(str(exc), status_code=400)
     except Exception as exc:
         return error_response(f"Unexpected processing error: {exc}", status_code=500)
+
+
+@app.post("/card")
+def create_card(req: CardRequest) -> StreamingResponse:
+    """Render a 1080x1080 Golden-branded carousel card (photo + text overlay)."""
+    try:
+        buffer = card_service.render_card(
+            image_url=req.image_url,
+            kicker=req.kicker,
+            headline=req.headline,
+            sub_text=req.sub_text,
+            wordmark=req.wordmark,
+            location=req.location,
+            role=req.role,
+            mode=req.mode,
+            accent=req.accent,
+            size=req.size,
+            quality=req.quality,
+        )
+        return StreamingResponse(
+            buffer,
+            media_type="image/jpeg",
+            headers={
+                "Content-Disposition": "attachment; filename=card.jpg",
+                "Cache-Control": "no-store",
+            },
+        )
+    except CardError as exc:
+        return error_response(str(exc), status_code=400)
+    except Exception as exc:
+        return error_response(f"Unexpected card error: {exc}", status_code=500)
