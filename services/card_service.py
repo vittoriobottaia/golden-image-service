@@ -10,6 +10,7 @@ carousel n8n workflow: one deterministic HTTP call, no headless browser.
 
 import io
 import os
+import time
 from typing import Optional, List, Tuple
 
 import requests
@@ -32,7 +33,18 @@ FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 class CardService:
     MAX_FETCH_BYTES = 25 * 1024 * 1024
-    FETCH_TIMEOUT_S = 20
+    FETCH_TIMEOUT_S = 30
+    FETCH_RETRIES = 3
+    RETRY_STATUS = {408, 425, 429, 500, 502, 503, 504}
+    FETCH_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://goldenflyfishing.com/",
+    }
 
     def __init__(self) -> None:
         self.service_name = "Golden Media API"
@@ -94,24 +106,40 @@ class CardService:
 
     # ---------- image acquisition ----------
     def _fetch_image(self, url: str) -> Image.Image:
-        try:
-            resp = requests.get(url, timeout=self.FETCH_TIMEOUT_S, stream=True)
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            raise CardError(f"Could not fetch image_url: {exc}") from exc
+        last_error = "unknown error"
+        for attempt in range(self.FETCH_RETRIES):
+            try:
+                resp = requests.get(
+                    url,
+                    timeout=self.FETCH_TIMEOUT_S,
+                    headers=self.FETCH_HEADERS,
+                    stream=True,
+                )
+            except requests.RequestException as exc:
+                last_error = str(exc)
+            else:
+                if resp.status_code in self.RETRY_STATUS:
+                    last_error = f"{resp.status_code} Server Error for url: {url}"
+                elif not resp.ok:
+                    raise CardError(f"Could not fetch image_url: {resp.status_code} for url: {url}")
+                else:
+                    data = resp.content
+                    if not data:
+                        raise CardError("Fetched image is empty")
+                    if len(data) > self.MAX_FETCH_BYTES:
+                        raise CardError("Fetched image exceeds the 25 MB limit")
+                    try:
+                        image = Image.open(io.BytesIO(data))
+                        image = ImageOps.exif_transpose(image)
+                        image.load()
+                    except (UnidentifiedImageError, OSError, ValueError) as exc:
+                        raise CardError("Fetched file is not a valid image") from exc
+                    return self._ensure_rgb(image)
 
-        data = resp.content
-        if not data:
-            raise CardError("Fetched image is empty")
-        if len(data) > self.MAX_FETCH_BYTES:
-            raise CardError("Fetched image exceeds the 25 MB limit")
-        try:
-            image = Image.open(io.BytesIO(data))
-            image = ImageOps.exif_transpose(image)
-            image.load()
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
-            raise CardError("Fetched file is not a valid image") from exc
-        return self._ensure_rgb(image)
+            if attempt < self.FETCH_RETRIES - 1:
+                time.sleep(1.5 * (attempt + 1))
+
+        raise CardError(f"Could not fetch image_url after {self.FETCH_RETRIES} attempts: {last_error}")
 
     def _ensure_rgb(self, image: Image.Image) -> Image.Image:
         if image.mode in {"RGBA", "LA", "P"}:
