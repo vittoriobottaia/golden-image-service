@@ -35,6 +35,18 @@ class CardService:
     MAX_FETCH_BYTES = 25 * 1024 * 1024
     FETCH_TIMEOUT_S = 30
     FETCH_RETRIES = 3
+    # Overlay strength -> bottom-gradient max alpha (0-255)
+    STRENGTH_ALPHA = {"light": 175, "medium": 217, "strong": 242}
+    # Design variant presets (from DESIGN_VARIATION_SELECTOR agent)
+    VARIANT_PRESETS = {
+        "editorial_dark":  {"strength": "strong"},
+        "cinematic_hero":  {"strength": "medium"},
+        "technical_guide": {"strength": "medium"},
+        "lodge_warm":      {"strength": "medium"},
+        "premium_minimal": {"strength": "light"},
+        "story_proof":     {"strength": "medium"},
+        "cta_clean":       {"strength": "strong", "center": True},
+    }
     RETRY_STATUS = {408, 425, 429, 500, 502, 503, 504}
     FETCH_HEADERS = {
         "User-Agent": (
@@ -63,12 +75,23 @@ class CardService:
         accent: bool = True,
         size: int = 1080,
         quality: int = 92,
+        design_variant: str = "",
+        overlay_strength: str = "",
+        typography_style: str = "",
     ) -> io.BytesIO:
         if not image_url:
             raise CardError("image_url is required")
 
         base_photo = self._fetch_image(image_url)
-        is_cta = str(role).lower() in {"cta", "cta_cover", "conversion"}
+
+        # Resolve design variant -> overlay strength, layout, headline font
+        preset = self.VARIANT_PRESETS.get(str(design_variant).lower(), {})
+        strength = (str(overlay_strength).lower() or preset.get("strength", "medium"))
+        grad_alpha = self.STRENGTH_ALPHA.get(strength, 217)
+        is_cta = str(role).lower() in {"cta", "cta_cover", "conversion"} or preset.get("center", False)
+        head_font = ("Inter-SemiBold.ttf"
+                     if str(typography_style).lower() in {"modern_sans", "sans"}
+                     else "PlayfairDisplay-SemiBold.ttf")
 
         # Decide crop strategy
         chosen = mode
@@ -82,10 +105,11 @@ class CardService:
         else:
             canvas = self._cover(base_photo, size, size)
 
-        # Legibility + brand layers
-        canvas = self._apply_bottom_gradient(canvas, strong=is_cta)
+        # Legibility + brand layers (gradient intensity driven by overlay strength)
+        canvas = self._apply_bottom_gradient(canvas, max_alpha=grad_alpha,
+                                             start=(0.28 if is_cta else 0.42))
         if is_cta:
-            canvas = self._apply_flat_veil(canvas, alpha=90)
+            canvas = self._apply_flat_veil(canvas, alpha=(110 if strength == "strong" else 80))
         canvas = self._apply_frame(canvas)
 
         draw = ImageDraw.Draw(canvas)
@@ -95,9 +119,9 @@ class CardService:
 
         if is_cta:
             self._draw_center_block(canvas, draw, kicker, headline, sub_text, accent, size,
-                                    show_pill=(str(role).lower() == "cta_cover"))
+                                    head_font, show_pill=(str(role).lower() == "cta_cover"))
         else:
-            self._draw_bottom_left_block(draw, kicker, headline, accent, size)
+            self._draw_bottom_left_block(draw, kicker, headline, accent, size, head_font)
 
         out = io.BytesIO()
         canvas.convert("RGB").save(out, format="JPEG", quality=quality, optimize=True)
@@ -178,10 +202,9 @@ class CardService:
         return canvas
 
     # ---------- brand overlays ----------
-    def _apply_bottom_gradient(self, canvas: Image.Image, strong: bool = False) -> Image.Image:
+    def _apply_bottom_gradient(self, canvas: Image.Image, max_alpha: int = 217,
+                               start: float = 0.42) -> Image.Image:
         w, h = canvas.size
-        max_alpha = 235 if strong else 217
-        start = 0.28 if strong else 0.42  # where the gradient begins (fraction from top)
         grad = Image.new("L", (1, h), 0)
         for y in range(h):
             frac = y / (h - 1)
@@ -275,11 +298,12 @@ class CardService:
         self._draw_tracked(draw, (size - 64 - width, 56), text, font, GOLDEN_OLIVE, tracking=2)
 
     def _draw_bottom_left_block(self, draw: ImageDraw.ImageDraw, kicker: str, headline: str,
-                                accent: bool, size: int) -> None:
+                                accent: bool, size: int,
+                                head_font: str = "PlayfairDisplay-SemiBold.ttf") -> None:
         margin = 64
         max_width = size - margin * 2
         kfont = self._font("Inter-SemiBold.ttf", 24)
-        hfont = self._font("PlayfairDisplay-SemiBold.ttf", 60)
+        hfont = self._font(head_font, 60)
         lines = self._wrap(draw, headline, hfont, max_width)
         line_h = int(hfont.size * 1.06)
 
@@ -301,11 +325,12 @@ class CardService:
 
     def _draw_center_block(self, canvas: Image.Image, draw: ImageDraw.ImageDraw, kicker: str,
                            headline: str, sub_text: str, accent: bool, size: int,
+                           head_font: str = "PlayfairDisplay-SemiBold.ttf",
                            show_pill: bool = False) -> None:
         margin = 90
         max_width = size - margin * 2
         kfont = self._font("Inter-SemiBold.ttf", 24)
-        hfont = self._font("PlayfairDisplay-SemiBold.ttf", 66)
+        hfont = self._font(head_font, 66)
         sfont = self._font("Inter-Regular.ttf", 28)
 
         lines = self._wrap(draw, headline, hfont, max_width)

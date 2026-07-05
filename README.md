@@ -42,6 +42,9 @@ Body:
 ```
 - `mode`: `auto` (default, decide cover/contain según el aspecto) | `cover` | `contain`.
 - `role`: `cta` o `cta_cover` centran el bloque y oscurecen (para la portada del lead magnet).
+- `design_variant` (opcional): `cinematic_hero` | `editorial_dark` | `technical_guide` | `lodge_warm` | `premium_minimal` | `story_proof` | `cta_clean`. Ajusta intensidad de overlay y layout (cta_clean centra).
+- `overlay_strength` (opcional): `light` | `medium` | `strong` — intensidad del gradiente de legibilidad.
+- `typography_style` (opcional): `premium_serif` (default, Playfair) | `modern_sans` (Inter en la headline).
 - Devuelve `image/jpeg`.
 
 ## Ejemplos desde n8n

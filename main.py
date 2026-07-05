@@ -25,6 +25,9 @@ class CardRequest(BaseModel):
     accent: bool = True
     size: int = 1080
     quality: int = 92
+    design_variant: str = ""    # cinematic_hero | editorial_dark | lodge_warm | premium_minimal | cta_clean | ...
+    overlay_strength: str = ""  # light | medium | strong
+    typography_style: str = ""  # premium_serif (default) | modern_sans
 
 
 @app.get("/")
@@ -164,6 +167,9 @@ def create_card(req: CardRequest) -> StreamingResponse:
             accent=req.accent,
             size=req.size,
             quality=req.quality,
+            design_variant=req.design_variant,
+            overlay_strength=req.overlay_strength,
+            typography_style=req.typography_style,
         )
         return StreamingResponse(
             buffer,
