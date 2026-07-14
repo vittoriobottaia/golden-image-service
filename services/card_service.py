@@ -128,6 +128,114 @@ class CardService:
         out.seek(0)
         return out
 
+    # ---------- email hero ----------
+    def render_hero(
+        self,
+        image_url: str,
+        width: int = 1200,
+        height: int = 800,
+        mode: str = "auto",
+        protect_subject: bool = False,
+        kicker: str = "",
+        headline: str = "",
+        wordmark: str = "",
+        accent: bool = True,
+        frame: bool = False,
+        quality: int = 86,
+    ) -> io.BytesIO:
+        """Render a rectangular, brand-safe hero for an email.
+
+        Why this exists, and why /card could not do it:
+
+        /card renders a square (size x size). An email hero is rectangular —
+        it sits at the top of a 600px-wide card. Serving the raw photo with
+        <img width="100%"> is not an option either: the media bank holds
+        photos of every shape, so a portrait shot becomes a 900px-tall hero
+        and wrecks the layout.
+
+        And there is one Golden rule that plain HTML simply cannot honour:
+        NEVER cover-crop a fish. A dorado cropped at the jaw is worse than
+        no photo at all. Pass protect_subject=True and the fish is contained
+        whole over a blurred bed of its own colours.
+
+        Text is optional and OFF by default: the email already has its own
+        headline. A clean, correctly-framed photograph is usually the
+        strongest hero there is.
+        """
+        if not image_url:
+            raise CardError("image_url is required")
+        if width < 1 or height < 1:
+            raise CardError("width and height must be positive")
+
+        photo = self._fetch_image(image_url)
+
+        chosen = (mode or "auto").lower()
+        if protect_subject:
+            # The fish rule. Non-negotiable, overrides everything.
+            chosen = "contain"
+        elif chosen == "auto":
+            sw, sh = photo.size
+            photo_ar = sw / sh
+            target_ar = width / height
+            # Portrait shots, or anything far narrower than the frame, would
+            # lose their subject to a cover crop. Contain them instead.
+            chosen = "contain" if (sh > sw or photo_ar < target_ar * 0.72) else "cover"
+
+        canvas = (self._contain_with_blur(photo, width, height)
+                  if chosen == "contain"
+                  else self._cover(photo, width, height))
+
+        has_text = bool(kicker or headline or wordmark)
+
+        # The gradient exists to make text legible. No text, no gradient —
+        # we do not darken a good photograph for nothing.
+        if has_text:
+            canvas = self._apply_bottom_gradient(canvas, max_alpha=200, start=0.45)
+        if frame:
+            canvas = self._apply_frame(canvas)
+
+        if has_text:
+            draw = ImageDraw.Draw(canvas)
+            if wordmark:
+                self._draw_tracked(
+                    draw, (48, 40), wordmark.upper(),
+                    self._font("Inter-SemiBold.ttf", max(18, int(height * 0.028))),
+                    CREAM, tracking=6,
+                )
+            if kicker or headline:
+                self._draw_hero_block(draw, width, height, kicker, headline, accent)
+
+        out = io.BytesIO()
+        canvas.convert("RGB").save(out, format="JPEG", quality=quality, optimize=True)
+        out.seek(0)
+        return out
+
+    def _draw_hero_block(self, draw: ImageDraw.ImageDraw, w: int, h: int,
+                         kicker: str, headline: str, accent: bool) -> None:
+        """Bottom-left text block, scaled to the frame (not to a square)."""
+        margin = max(36, int(w * 0.05))
+        max_width = w - margin * 2
+        kfont = self._font("Inter-SemiBold.ttf", max(14, int(h * 0.028)))
+        hfont = self._font("PlayfairDisplay-SemiBold.ttf", max(28, int(h * 0.078)))
+
+        lines = self._wrap(draw, headline, hfont, max_width) if headline else []
+        line_h = int(hfont.size * 1.08)
+
+        rule_h = (2 + 14) if accent else 0
+        kicker_h = (kfont.size + 12) if kicker else 0
+        block_h = rule_h + kicker_h + line_h * len(lines)
+        y = h - max(32, int(h * 0.07)) - block_h
+
+        if accent:
+            draw.rectangle([margin, y, margin + int(w * 0.05), y + 2], fill=DORADO_GOLD)
+            y += rule_h
+        if kicker:
+            self._draw_tracked(draw, (margin, y), kicker.upper(), kfont, GOLDEN_OLIVE, tracking=3)
+            y += kicker_h
+        for line in lines:
+            draw.text((margin, y), line, font=hfont, fill=CREAM)
+            y += line_h
+
     # ---------- image acquisition ----------
     def _fetch_image(self, url: str) -> Image.Image:
         last_error = "unknown error"

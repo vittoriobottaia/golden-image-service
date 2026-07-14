@@ -30,6 +30,20 @@ class CardRequest(BaseModel):
     typography_style: str = ""  # premium_serif (default) | modern_sans
 
 
+class EmailHeroRequest(BaseModel):
+    image_url: str
+    width: int = 1200            # renders at 2x for a 600px-wide email card
+    height: int = 800            # 3:2 — the shape most of the photo bank already is
+    mode: str = "auto"           # auto | cover | contain
+    protect_subject: bool = False  # True => never crop the subject (the fish rule)
+    kicker: str = ""
+    headline: str = ""
+    wordmark: str = ""           # empty by default: the email header already carries the brand
+    accent: bool = True
+    frame: bool = False          # the email card has its own rounded border
+    quality: int = 86
+
+
 @app.get("/")
 def root() -> dict:
     return image_service.build_root_payload()
@@ -183,3 +197,39 @@ def create_card(req: CardRequest) -> StreamingResponse:
         return error_response(str(exc), status_code=400)
     except Exception as exc:
         return error_response(f"Unexpected card error: {exc}", status_code=500)
+
+
+@app.post("/email-hero")
+def create_email_hero(req: EmailHeroRequest) -> StreamingResponse:
+    """Render a rectangular, brand-safe hero image for an email.
+
+    /card is square. An email hero is not. And a raw photo dropped into an
+    <img> cannot honour the rule that a fish is never cover-cropped — this
+    can: pass protect_subject=true and the subject is contained whole.
+    """
+    try:
+        buffer = card_service.render_hero(
+            image_url=req.image_url,
+            width=req.width,
+            height=req.height,
+            mode=req.mode,
+            protect_subject=req.protect_subject,
+            kicker=req.kicker,
+            headline=req.headline,
+            wordmark=req.wordmark,
+            accent=req.accent,
+            frame=req.frame,
+            quality=req.quality,
+        )
+        return StreamingResponse(
+            buffer,
+            media_type="image/jpeg",
+            headers={
+                "Content-Disposition": "attachment; filename=hero.jpg",
+                "Cache-Control": "no-store",
+            },
+        )
+    except CardError as exc:
+        return error_response(str(exc), status_code=400)
+    except Exception as exc:
+        return error_response(f"Unexpected hero error: {exc}", status_code=500)
